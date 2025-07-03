@@ -1066,3 +1066,305 @@ export default Dashboard;
 
 */
 
+/*
+Original dashboard
+
+import { useState, useEffect } from "react";
+import NetworkHealthGauge from "@/components/dashboard/NetworkHealthGauge";
+import MetricCard from "@/components/dashboard/MetricCard";
+import StatusCard from "@/components/dashboard/StatusCard";
+import AlertBanner from "@/components/dashboard/AlertBanner";
+import ProtocolDistribution from "@/components/dashboard/ProtocolDistribution";
+import MultiLineChart from "@/components/dashboard/MultiLineChart";
+import NetworkAnalysis from "@/components/dashboard/NetworkAnalysis";
+import { Clock, Wifi, FileTerminal, Database, Activity } from "lucide-react";
+
+interface MetricsData {
+  latency: number;
+  jitter: number;
+  packetLoss: number;
+  bandwidth: number;
+  dnsDelay: number;
+  healthScore: number;
+  stability: "stable" | "unstable" | "critical";
+  congestion: "stable" | "unstable" | "critical";
+  protocolData: { name: string; value: number }[];
+  topAppsData: { name: string; value: number }[];
+}
+
+interface LatencyDataPoint {
+  timestamp: number;
+  latency: number;
+  baseline: number;
+}
+
+interface BandwidthDataPoint {
+  timestamp: number;
+  bandwidth: number;
+  target: number;
+}
+
+interface JitterDataPoint {
+  timestamp: number;
+  jitter: number;
+  packetLoss: number;
+}
+
+const Dashboard = () => {
+  const [metrics, setMetrics] = useState<MetricsData>({
+    latency: 0,
+    jitter: 0,
+    packetLoss: 0,
+    bandwidth: 0,
+    dnsDelay: 0,
+    healthScore: 50,
+    stability: "stable",
+    congestion: "stable",
+    protocolData: [],
+    topAppsData: []
+  });
+  const [latencyData, setLatencyData] = useState<LatencyDataPoint[]>([]);
+  const [bandwidthData, setBandwidthData] = useState<BandwidthDataPoint[]>([]);
+  const [jitterData, setJitterData] = useState<JitterDataPoint[]>([]);
+  const [protocolData, setProtocolData] = useState<{ name: string; value: number }[]>([]);
+  const [topAppsData, setTopAppsData] = useState<{ name: string; value: number }[]>([]);
+  const [showAlert, setShowAlert] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(true);
+
+  const fetchMetrics = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/metrics');
+      if (!response.ok) throw new Error('Failed to fetch metrics');
+      const data = await response.json();
+      setMetrics({
+        latency: data.latency,
+        jitter: data.jitter,
+        packetLoss: data.packetLoss,
+        bandwidth: data.bandwidth,
+        dnsDelay: data.dnsDelay,
+        healthScore: data.healthScore,
+        stability: data.stability,
+        congestion: data.congestion,
+        protocolData: data.protocolData,
+        topAppsData: data.topAppsData
+      });
+
+      const now = Date.now();
+      setLatencyData(prev => [
+        ...prev.slice(-59),
+        { timestamp: now, latency: data.latency, baseline: 50 }
+      ]);
+      setBandwidthData(prev => [
+        ...prev.slice(-59),
+        { timestamp: now, bandwidth: data.bandwidth, target: 90 }
+      ]);
+      setJitterData(prev => [
+        ...prev.slice(-59),
+        { timestamp: now, jitter: data.jitter, packetLoss: data.packetLoss * 3 }
+      ]);
+      setProtocolData(data.protocolData);
+      setTopAppsData(data.topAppsData);
+      setShowAlert(data.healthScore < 50 && showNotifications);
+    } catch (err) {
+      console.error('Fetch metrics error:', err);
+    }
+  };
+
+  useEffect(() => {
+    const savedSettings = localStorage.getItem('pxmonitor-settings');
+    if (savedSettings) {
+      try {
+        const parsedSettings = JSON.parse(savedSettings);
+        const notificationsSetting = parsedSettings
+          .find((group: any) => group.id === "general")
+          ?.settings.find((setting: any) => setting.id === "notifications")?.value;
+        if (notificationsSetting !== undefined) {
+          setShowNotifications(notificationsSetting);
+        }
+      } catch (error) {
+        console.error("Error loading notification settings:", error);
+      }
+    }
+
+    // Fetch metrics initially and every 5 seconds
+    fetchMetrics();
+    const interval = setInterval(fetchMetrics, 5000);
+
+    return () => clearInterval(interval);
+  }, [showNotifications]);
+
+  useEffect(() => {
+    const handleSettingsUpdate = (event: any) => {
+      if (event.detail?.showNotifications !== undefined) {
+        setShowNotifications(event.detail.showNotifications);
+      }
+    };
+    window.addEventListener('settingsUpdated', handleSettingsUpdate);
+    return () => window.removeEventListener('settingsUpdated', handleSettingsUpdate);
+  }, []);
+
+  const handleFixNetwork = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(metrics)
+      });
+      const { analysis } = await response.json();
+      console.log('Network fix suggestions:', analysis);
+      setMetrics(prev => ({
+        ...prev,
+        healthScore: Math.min(85, prev.healthScore + 40),
+        latency: Math.max(20, prev.latency - 50),
+        packetLoss: Math.max(0.2, prev.packetLoss - 5),
+        bandwidth: Math.min(95, prev.bandwidth + 20),
+        stability: "stable" as const,
+        congestion: "stable" as const
+      }));
+      setShowAlert(false);
+    } catch (err) {
+      console.error('Error fixing network:', err);
+    }
+  };
+
+  return (
+    <div className="grid-bg">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold font-montserrat">Network Dashboard</h1>
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/20 text-muted-foreground text-sm">
+          <Clock size={16} />
+          <span>Updated just now</span>
+        </div>
+      </div>
+      
+      {showAlert && (
+        <AlertBanner
+          message="Your network performance is degraded!"
+          type="error"
+          actionText="Fix Now"
+          onAction={handleFixNetwork}
+          className="mb-6 max-w-4xl"
+        />
+      )}
+      
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <NetworkHealthGauge score={metrics.healthScore} />
+        <StatusCard 
+          title="Connection Stability" 
+          status={metrics.stability} 
+          description={
+            metrics.stability === "stable" 
+              ? "Your connection is reliable and stable" 
+              : "Your connection is experiencing issues"
+          }
+        />
+        <StatusCard 
+          title="Network Congestion" 
+          status={metrics.congestion}
+          description={
+            metrics.congestion === "stable" 
+              ? "Network traffic is flowing smoothly" 
+              : "Network traffic is congested"
+          }
+        />
+      </div>
+      
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <MetricCard
+          title="Latency"
+          value={metrics.latency}
+          unit="ms"
+          icon={<Activity size={18} />}
+          status={metrics.latency < 50 ? "success" : metrics.latency < 100 ? "warning" : "danger"}
+        />
+        <MetricCard
+          title="Jitter"
+          value={metrics.jitter}
+          unit="ms"
+          icon={<Activity size={18} />}
+          status={metrics.jitter < 10 ? "success" : metrics.jitter < 20 ? "warning" : "danger"}
+        />
+        <MetricCard
+          title="Packet Loss"
+          value={metrics.packetLoss}
+          unit="%"
+          icon={<FileTerminal size={18} />}
+          status={metrics.packetLoss < 1 ? "success" : metrics.packetLoss < 3 ? "warning" : "danger"}
+        />
+        <MetricCard
+          title="DNS Delay"
+          value={metrics.dnsDelay}
+          unit="ms"
+          icon={<Database size={18} />}
+          status={metrics.dnsDelay < 30 ? "success" : metrics.dnsDelay < 70 ? "warning" : "danger"}
+        />
+        <MetricCard
+          title="Bandwidth"
+          value={metrics.bandwidth}
+          unit="Mbps"
+          icon={<Wifi size={18} />}
+          status={metrics.bandwidth > 80 ? "success" : metrics.bandwidth > 40 ? "warning" : "danger"}
+        />
+      </div>
+      
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <MultiLineChart
+          title="Network Latency & Baseline"
+          description="Real-time latency compared to target baseline"
+          data={latencyData.map(d => ({ 
+            timestamp: d.timestamp, 
+            latency: d.latency, 
+            baseline: d.baseline 
+          }))}
+          lines={[
+            { id: 'latency', name: 'Latency (ms)', color: '#F87171' },
+            { id: 'baseline', name: 'Target', color: '#22C55E' }
+          ]}
+          yAxisLabel="ms"
+          height={250}
+        />
+        <MultiLineChart
+          title="Bandwidth Trend"
+          description="Bandwidth usage over time with target threshold"
+          data={bandwidthData.map(d => ({ 
+            timestamp: d.timestamp, 
+            bandwidth: d.bandwidth,
+            target: d.target
+          }))}
+          lines={[
+            { id: 'bandwidth', name: 'Bandwidth (Mbps)', color: '#00B7EB' },
+            { id: 'target', name: 'Target', color: '#8B5CF6' }
+          ]}
+          yAxisLabel="Mbps"
+          height={250}
+        />
+      </div>
+      
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <ProtocolDistribution data={protocolData} />
+        <MultiLineChart
+          title="Connection Quality"
+          description="Jitter and packet loss affecting quality"
+          data={jitterData.map(d => ({ 
+            timestamp: d.timestamp, 
+            jitter: d.jitter,
+            packetLoss: d.packetLoss 
+          }))}
+          lines={[
+            { id: 'jitter', name: 'Jitter (ms)', color: '#F06292' },
+            { id: 'packetLoss', name: 'Packet Loss (%)', color: '#EF5350' }
+          ]}
+          yAxisLabel="Value"
+          height={250}
+        />
+      </div>
+      
+      <div className="mb-6">
+        <NetworkAnalysis metrics={metrics} />
+      </div>
+    </div>
+  );
+};
+
+export default Dashboard;
+*/
